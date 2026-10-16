@@ -1,0 +1,113 @@
+// =============================================================================
+//  GitHub Detection Lab - YARA-L 2.0 rules for Google SecOps
+//  Written against the default GitHub audit-log parser (log type GITHUB).
+//  Field paths vary by parser version - CONFIRM each against a real ingested
+//  event in the UDM viewer before trusting a rule in production.
+//  Comments mark the paths most likely to need adjusting.
+// =============================================================================
+
+// --- 01 Credential scanning: push-protection bypass -------------------------
+rule github_secret_push_protection_bypass {
+  meta:
+    author = "airt-lab"
+    description = "User bypassed secret-scanning push protection and pushed a detected secret"
+    mitre_tactic = "Defense Evasion"
+    mitre_technique = "T1562.001"
+    severity = "MEDIUM"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = "secret_scanning_push_protection.bypass"
+    $actor = $e.principal.user.userid
+  condition:
+    $e
+}
+
+// --- 02a Data exfiltration: mass clone (org/enterprise - needs git.* events) -
+rule github_mass_repo_clone {
+  meta:
+    author = "airt-lab"
+    description = "Single actor cloned/fetched many repositories in a short window"
+    mitre_tactic = "Collection"
+    mitre_technique = "T1213"
+    severity = "MEDIUM"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = /^git\.(clone|fetch)$/
+    $actor = $e.principal.user.userid
+  match:
+    $actor over 10m
+  outcome:
+    // confirm which field your parser populates for the repo name
+    $repo_count = count_distinct($e.target.resource.name)
+  condition:
+    $e and $repo_count >= 20
+}
+
+// --- 02b Data exfiltration: repo turned public ------------------------------
+rule github_repo_made_public {
+  meta:
+    author = "airt-lab"
+    description = "Repository visibility changed (refine to value = public)"
+    mitre_tactic = "Exfiltration"
+    mitre_technique = "T1567"
+    severity = "HIGH"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = "repo.access"
+    // visibility value usually lands in security_result.about.labels - refine here
+    $actor = $e.principal.user.userid
+  condition:
+    $e
+}
+
+// --- 03 Credential access: new PAT / SSH key / OAuth token ------------------
+rule github_new_credential_material {
+  meta:
+    author = "airt-lab"
+    description = "New long-lived credential added: PAT, SSH/deploy key, or OAuth token"
+    mitre_tactic = "Persistence"
+    mitre_technique = "T1098"
+    severity = "LOW"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = /(personal_access_token\.(access_granted|request_created)|public_key\.create|oauth_(authorization|access)\.create)/
+    $actor = $e.principal.user.userid
+  match:
+    $actor over 1h
+  outcome:
+    $kinds = count_distinct($e.metadata.product_event_type)
+  condition:
+    $e
+}
+
+// --- 04 Repo change: guardrail teardown / destruction ----------------------
+rule github_repo_guardrail_tamper {
+  meta:
+    author = "airt-lab"
+    description = "Branch protection removed/overridden or repository deleted"
+    mitre_tactic = "Impact"
+    mitre_technique = "T1485"
+    severity = "HIGH"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = /(protected_branch\.(destroy|policy_override)|repo\.destroy)/
+    $actor = $e.principal.user.userid
+  condition:
+    $e
+}
+
+// --- 05 CI/CD abuse: rogue runner / Actions enabled ------------------------
+rule github_ci_foothold {
+  meta:
+    author = "airt-lab"
+    description = "Self-hosted runner registered or GitHub Actions enabled on a repo"
+    mitre_tactic = "Persistence"
+    mitre_technique = "T1195.002"
+    severity = "MEDIUM"
+  events:
+    $e.metadata.log_type = "GITHUB"
+    $e.metadata.product_event_type = /(self_hosted_runner|repo\.actions_enabled)/
+    $actor = $e.principal.user.userid
+  condition:
+    $e
+}

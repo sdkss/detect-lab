@@ -1,0 +1,15 @@
+# Benign CI workflow for the detection lab.
+# Simulates a "secret-touching pipeline" by echoing a FAKE value only.
+# It does NOT exfiltrate anything. Its purpose is to generate Actions activity.
+name: lab-canary
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  touch-secret:
+    runs-on: ubuntu-latest
+    steps:
+      - name: simulate secret handling (fake value)
+        run: echo "simulated secret handling for: $DUMMY"
+        env:
+          DUMMY: "not-a-real-secret-TESTVALUE"
